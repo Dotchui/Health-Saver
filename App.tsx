@@ -5,11 +5,17 @@ import TestScreen from './src/screens/TestScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import AddictionSelectionScreen from './src/screens/AddictionSelectionScreen';
 import ReminderSettingsScreen from './src/screens/ReminderSettingsScreen';
+import StatsScreen from './src/screens/StatsScreen';
 
 export type RootStackParamList = {
   Home: undefined;
   AddictionSelection: undefined;
-  ReminderSettings: { addictionId: string };
+  ReminderSettings: {
+    addictionId: string;
+    initialDailyHours?: number;
+    initialDailyMoney?: number;
+  };
+  Stats: { addictionId: string };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -38,6 +44,16 @@ export default function App() {
           component={ReminderSettingsScreen}
           options={{
             title: 'Reminder Settings',
+            headerStyle: { backgroundColor: '#6366f1' },
+            headerTintColor: '#fff',
+            headerTitleStyle: { fontWeight: '700' },
+          }}
+        />
+        <Stack.Screen 
+          name="Stats" 
+          component={StatsScreen}
+          options={{
+            title: 'Statistics',
             headerStyle: { backgroundColor: '#6366f1' },
             headerTintColor: '#fff',
             headerTitleStyle: { fontWeight: '700' },

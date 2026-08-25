@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { UserAddiction } from '../types';
+import { UserAddiction, StreakHistoryEntry, calculateSoberTime } from '../types';
 
 const STORAGE_KEY = '@healthsaver_addictions';
 
@@ -56,6 +56,45 @@ export const storageService = {
       }
     } catch (error) {
       console.error('Error updating addiction:', error);
+      throw error;
+    }
+  },
+
+  async resetStreak(addictionId: string): Promise<UserAddiction | null> {
+    try {
+      const addictions = await this.getAddictions();
+      const index = addictions.findIndex((a) => a.addictionId === addictionId);
+      if (index !== -1) {
+        const item = addictions[index];
+        const startDate = new Date(item.startDate);
+        const endDate = new Date();
+        const soberTime = calculateSoberTime(startDate, endDate);
+
+        const historyEntry: StreakHistoryEntry = {
+          startDate: startDate.toISOString(),
+          endDate: endDate.toISOString(),
+          days: soberTime.days,
+          hours: soberTime.hours,
+          totalHours: soberTime.totalHours,
+        };
+
+        const updatedHistory = [...(item.streakHistory || []), historyEntry];
+
+        const updatedAddiction: UserAddiction = {
+          ...item,
+          startDate: endDate.toISOString(),
+          daysSober: 0,
+          hoursSober: 0,
+          streakHistory: updatedHistory,
+        };
+
+        addictions[index] = updatedAddiction;
+        await this.saveAddictions(addictions);
+        return updatedAddiction;
+      }
+      return null;
+    } catch (error) {
+      console.error('Error resetting streak:', error);
       throw error;
     }
   },

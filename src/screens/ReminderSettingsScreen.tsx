@@ -5,49 +5,76 @@ import {
   StyleSheet,
   TouchableOpacity,
   Switch,
-  Alert,
   ScrollView,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { COMMON_ADDICTIONS, UserAddiction } from '../types';
+import { COMMON_ADDICTIONS, UserAddiction, ADDICTION_SAVINGS_MAP, DEFAULT_SAVINGS } from '../types';
 import { storageService } from '../services/storageService';
 import { notificationService } from '../services/notificationService';
+import CustomAlertModal, { AlertButton } from '../components/CustomAlertModal';
 
 type RootStackParamList = {
   Home: undefined;
   AddictionSelection: undefined;
-  ReminderSettings: { addictionId: string };
+  ReminderSettings: {
+    addictionId: string;
+    initialDailyHours?: number;
+    initialDailyMoney?: number;
+  };
+  Stats: { addictionId: string };
 };
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ReminderSettings'>;
 
+const ITEM_HEIGHT = 40;
+const PICKER_HEIGHT = 120;
+const HALF_PICKER = (PICKER_HEIGHT - ITEM_HEIGHT) / 2;
+
 export default function ReminderSettingsScreen({ route, navigation }: Props) {
-  const { addictionId } = route.params;
+  const { addictionId, initialDailyHours, initialDailyMoney } = route.params;
   const addiction = COMMON_ADDICTIONS.find((a) => a.id === addictionId);
 
   const [selectedHour, setSelectedHour] = useState(9);
   const [selectedMinute, setSelectedMinute] = useState(0);
+  const [dailyHours, setDailyHours] = useState<number>(
+    initialDailyHours || ADDICTION_SAVINGS_MAP[addictionId]?.dailyHours || DEFAULT_SAVINGS.dailyHours
+  );
+
+  const [dailyMoney, setDailyMoney] = useState<number>(
+    initialDailyMoney || ADDICTION_SAVINGS_MAP[addictionId]?.dailyMoney || DEFAULT_SAVINGS.dailyMoney
+  );
+
   const [enabled, setEnabled] = useState(true);
   const [existingAddiction, setExistingAddiction] = useState<UserAddiction | null>(null);
+  const [alertConfig, setAlertConfig] = useState<{
+    visible: boolean;
+    title: string;
+    message?: string;
+    type?: 'success' | 'danger' | 'info' | 'warning';
+    buttons?: AlertButton[];
+  }>({
+    visible: false,
+    title: '',
+  });
   
   const hourScrollRef = useRef<ScrollView>(null);
   const minuteScrollRef = useRef<ScrollView>(null);
+
+  const hours = Array.from({ length: 24 }, (_, i) => i);
+  const minutes = Array.from({ length: 12 }, (_, i) => i * 5);
 
   useEffect(() => {
     loadExistingSettings();
   }, []);
 
-  const scrollToSelectedTime = () => {
-    // Each time option has ~40px height (8px padding top + 8px bottom + ~24px content)
-    const itemHeight = 40;
-    
+  const scrollToTime = (hour: number, minute: number, animated = false) => {
     if (hourScrollRef.current) {
-      hourScrollRef.current.scrollTo({ y: selectedHour * itemHeight, animated: false });
+      hourScrollRef.current.scrollTo({ y: hour * ITEM_HEIGHT, animated });
     }
     
     if (minuteScrollRef.current) {
-      const minuteIndex = selectedMinute / 5; // Convert minute to index (0, 5, 10... becomes 0, 1, 2...)
-      minuteScrollRef.current.scrollTo({ y: minuteIndex * itemHeight, animated: false });
+      const minuteIndex = minute / 5;
+      minuteScrollRef.current.scrollTo({ y: minuteIndex * ITEM_HEIGHT, animated });
     }
   };
 
@@ -55,49 +82,59 @@ export default function ReminderSettingsScreen({ route, navigation }: Props) {
     const addictions = await storageService.getAddictions();
     const existing = addictions.find((a) => a.addictionId === addictionId);
     
+    let hourToSet = 9;
+    let minuteToSet = 0;
+
     if (existing) {
       setExistingAddiction(existing);
+      if (typeof existing.customDailyHours === 'number') {
+        setDailyHours(existing.customDailyHours);
+      }
       const [hour, minute] = existing.reminderTime.split(':').map(Number);
-      setSelectedHour(hour);
-      setSelectedMinute(minute);
+      hourToSet = hour;
+      minuteToSet = minute;
       setEnabled(existing.enabled);
-      
-      // Scroll to the time after a short delay to ensure layout is complete
-      setTimeout(() => {
-        scrollToTime(hour, minute);
-      }, 300);
     } else if (addictions.length > 0) {
       // For new addictions, use the time from the most recently saved addiction
       const lastAddiction = addictions[addictions.length - 1];
       const [hour, minute] = lastAddiction.reminderTime.split(':').map(Number);
-      setSelectedHour(hour);
-      setSelectedMinute(minute);
-      
-      // Scroll to the time after a short delay to ensure layout is complete
-      setTimeout(() => {
-        scrollToTime(hour, minute);
-      }, 300);
+      hourToSet = hour;
+      minuteToSet = minute;
     }
+
+    setSelectedHour(hourToSet);
+    setSelectedMinute(minuteToSet);
+
+    // Scroll to center the time after a short delay to ensure layout is complete
+    setTimeout(() => {
+      scrollToTime(hourToSet, minuteToSet, false);
+    }, 150);
   };
 
-  const scrollToTime = (hour: number, minute: number) => {
-    // Calculate actual item height: padding (8*2) + fontSize (16) + some line spacing
-    // Let's measure more accurately: each TouchableOpacity with padding 8 top/bottom
-    // Text is 16px, but actual rendered height with padding is closer to 32px per item
-    const itemHeight = 32; 
-    const scrollViewHeight = 100; // Height of scrollPicker from styles
-    const centerOffset = (scrollViewHeight / 2) - (itemHeight / 2);
-    
-    if (hourScrollRef.current) {
-      const scrollY = (hour * itemHeight) - centerOffset;
-      hourScrollRef.current.scrollTo({ y: Math.max(0, scrollY), animated: true });
-    }
-    
-    if (minuteScrollRef.current) {
-      const minuteIndex = minute / 5;
-      const scrollY = (minuteIndex * itemHeight) - centerOffset;
-      minuteScrollRef.current.scrollTo({ y: Math.max(0, scrollY), animated: true });
-    }
+  const handleHourSelect = (hour: number) => {
+    if (!enabled) return;
+    setSelectedHour(hour);
+    hourScrollRef.current?.scrollTo({ y: hour * ITEM_HEIGHT, animated: true });
+  };
+
+  const handleMinuteSelect = (minute: number) => {
+    if (!enabled) return;
+    setSelectedMinute(minute);
+    minuteScrollRef.current?.scrollTo({ y: (minute / 5) * ITEM_HEIGHT, animated: true });
+  };
+
+  const handleHourScrollEnd = (event: any) => {
+    const y = event.nativeEvent.contentOffset.y;
+    const index = Math.round(y / ITEM_HEIGHT);
+    const clampedIndex = Math.max(0, Math.min(index, hours.length - 1));
+    setSelectedHour(clampedIndex);
+  };
+
+  const handleMinuteScrollEnd = (event: any) => {
+    const y = event.nativeEvent.contentOffset.y;
+    const index = Math.round(y / ITEM_HEIGHT);
+    const clampedIndex = Math.max(0, Math.min(index, minutes.length - 1));
+    setSelectedMinute(minutes[clampedIndex]);
   };
 
   const handleSave = async () => {
@@ -114,6 +151,8 @@ export default function ReminderSettingsScreen({ route, navigation }: Props) {
       reminderTime,
       enabled,
       daysSober: existingAddiction?.daysSober || 0,
+      streakHistory: existingAddiction?.streakHistory,
+      customDailyHours: dailyHours,
     };
 
     try {
@@ -121,6 +160,7 @@ export default function ReminderSettingsScreen({ route, navigation }: Props) {
         await storageService.updateAddiction(addictionId, {
           reminderTime,
           enabled,
+          customDailyHours: dailyHours,
         });
       } else {
         await storageService.addAddiction(userAddiction);
@@ -130,18 +170,34 @@ export default function ReminderSettingsScreen({ route, navigation }: Props) {
         await notificationService.scheduleReminder(userAddiction);
       }
 
-      Alert.alert(
-        'Success!',
-        `Your reminder for ${addiction.name} has been ${existingAddiction ? 'updated' : 'set up'}.`,
-        [
+      setAlertConfig({
+        visible: true,
+        title: 'Success!',
+        message: `Your reminder for ${addiction.name} has been ${existingAddiction ? 'updated' : 'set up'}.`,
+        type: 'success',
+        buttons: [
           {
             text: 'OK',
-            onPress: () => navigation.navigate('Home'),
+            onPress: () => {
+              setAlertConfig((prev) => ({ ...prev, visible: false }));
+              navigation.popToTop();
+            },
           },
-        ]
-      );
+        ],
+      });
     } catch (error) {
-      Alert.alert('Error', 'Failed to save reminder. Please try again.');
+      setAlertConfig({
+        visible: true,
+        title: 'Error',
+        message: 'Failed to save reminder. Please try again.',
+        type: 'warning',
+        buttons: [
+          {
+            text: 'OK',
+            onPress: () => setAlertConfig((prev) => ({ ...prev, visible: false })),
+          },
+        ],
+      });
     }
   };
 
@@ -152,9 +208,6 @@ export default function ReminderSettingsScreen({ route, navigation }: Props) {
       </View>
     );
   }
-
-  const hours = Array.from({ length: 24 }, (_, i) => i);
-  const minutes = Array.from({ length: 12 }, (_, i) => i * 5);
 
   return (
     <ScrollView style={styles.container}>
@@ -176,9 +229,15 @@ export default function ReminderSettingsScreen({ route, navigation }: Props) {
               <Text style={styles.timeLabel}>Hour</Text>
               <ScrollView 
                 ref={hourScrollRef}
-                style={styles.scrollPicker} 
+                style={styles.scrollPicker}
+                contentContainerStyle={styles.scrollPickerContent}
                 nestedScrollEnabled={true} 
                 scrollEnabled={enabled}
+                showsVerticalScrollIndicator={false}
+                snapToInterval={ITEM_HEIGHT}
+                decelerationRate="fast"
+                onMomentumScrollEnd={handleHourScrollEnd}
+                onScrollEndDrag={handleHourScrollEnd}
               >
                 {hours.map((hour) => (
                   <TouchableOpacity
@@ -187,7 +246,7 @@ export default function ReminderSettingsScreen({ route, navigation }: Props) {
                       styles.timeOption,
                       selectedHour === hour && styles.timeOptionSelected,
                     ]}
-                    onPress={() => enabled && setSelectedHour(hour)}
+                    onPress={() => handleHourSelect(hour)}
                     disabled={!enabled}
                   >
                     <Text
@@ -209,9 +268,15 @@ export default function ReminderSettingsScreen({ route, navigation }: Props) {
               <Text style={styles.timeLabel}>Minute</Text>
               <ScrollView 
                 ref={minuteScrollRef}
-                style={styles.scrollPicker} 
+                style={styles.scrollPicker}
+                contentContainerStyle={styles.scrollPickerContent}
                 nestedScrollEnabled={true} 
                 scrollEnabled={enabled}
+                showsVerticalScrollIndicator={false}
+                snapToInterval={ITEM_HEIGHT}
+                decelerationRate="fast"
+                onMomentumScrollEnd={handleMinuteScrollEnd}
+                onScrollEndDrag={handleMinuteScrollEnd}
               >
                 {minutes.map((minute) => (
                   <TouchableOpacity
@@ -220,7 +285,7 @@ export default function ReminderSettingsScreen({ route, navigation }: Props) {
                       styles.timeOption,
                       selectedMinute === minute && styles.timeOptionSelected,
                     ]}
-                    onPress={() => enabled && setSelectedMinute(minute)}
+                    onPress={() => handleMinuteSelect(minute)}
                     disabled={!enabled}
                   >
                     <Text
@@ -243,6 +308,39 @@ export default function ReminderSettingsScreen({ route, navigation }: Props) {
               {selectedHour.toString().padStart(2, '0')}:
               {selectedMinute.toString().padStart(2, '0')}
             </Text>
+          </View>
+        </View>
+
+        {/* Daily Time Lost Estimation Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Daily Time Lost</Text>
+          <Text style={styles.sectionSubtitle}>
+            Estimated hours lost per day to calculate your reclaimed time
+          </Text>
+
+          <View style={styles.dailyHoursRow}>
+            <TouchableOpacity
+              style={styles.hourStepBtn}
+              onPress={() => setDailyHours((prev) => Math.max(0.5, Math.round((prev - 0.5) * 10) / 10))}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.hourStepText}>−</Text>
+            </TouchableOpacity>
+
+            <View style={styles.hourValueContainer}>
+              <Text style={styles.hourValueText}>{dailyHours}</Text>
+              <Text style={styles.hourValueUnit}>
+                {dailyHours === 1 ? 'hour / day' : 'hours / day'}
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              style={styles.hourStepBtn}
+              onPress={() => setDailyHours((prev) => Math.min(24, Math.round((prev + 0.5) * 10) / 10))}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.hourStepText}>+</Text>
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -269,6 +367,15 @@ export default function ReminderSettingsScreen({ route, navigation }: Props) {
           </Text>
         </TouchableOpacity>
       </View>
+
+      <CustomAlertModal
+        visible={alertConfig.visible}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        type={alertConfig.type}
+        buttons={alertConfig.buttons}
+        onClose={() => setAlertConfig((prev) => ({ ...prev, visible: false }))}
+      />
     </ScrollView>
   );
 }
@@ -280,7 +387,7 @@ const styles = StyleSheet.create({
   },
   header: {
     padding: 12,
-    backgroundColor: '#6366f1',
+    backgroundColor: '#292949',
     alignItems: 'center',
     paddingTop: 10,
   },
@@ -342,16 +449,20 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   scrollPicker: {
-    height: 100,
+    height: PICKER_HEIGHT,
     width: 70,
   },
+  scrollPickerContent: {
+    paddingVertical: HALF_PICKER,
+  },
   timeOption: {
-    padding: 8,
+    height: ITEM_HEIGHT,
+    justifyContent: 'center',
     alignItems: 'center',
     borderRadius: 6,
   },
   timeOptionSelected: {
-    backgroundColor: '#6366f1',
+    backgroundColor: '#292949',
   },
   timeText: {
     fontSize: 16,
@@ -364,7 +475,7 @@ const styles = StyleSheet.create({
   timeSeparator: {
     fontSize: 24,
     fontWeight: '700',
-    color: '#6366f1',
+    color: '#292949',
     marginHorizontal: 12,
   },
   previewContainer: {
@@ -382,6 +493,49 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '700',
     color: '#6366f1',
+  },
+  dailyHoursRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#f9fafb',
+    borderRadius: 14,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    marginTop: 4,
+  },
+  hourStepBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 10,
+    backgroundColor: '#ffffff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  hourStepText: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#4f46e5',
+  },
+  hourValueContainer: {
+    alignItems: 'center',
+  },
+  hourValueText: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#1f2937',
+  },
+  hourValueUnit: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#6b7280',
+    marginTop: 2,
   },
   toggleRow: {
     flexDirection: 'row',
