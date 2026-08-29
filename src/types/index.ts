@@ -26,6 +26,7 @@ export interface UserAddiction {
   streakHistory?: StreakHistoryEntry[];
   customDailyHours?: number;
   customDailyMoney?: number;
+  notificationId?: string;
 }
 
 export interface SoberTime {

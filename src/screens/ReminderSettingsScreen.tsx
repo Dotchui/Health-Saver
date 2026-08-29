@@ -7,6 +7,7 @@ import {
   Switch,
   ScrollView,
 } from 'react-native';
+
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { COMMON_ADDICTIONS, UserAddiction, ADDICTION_SAVINGS_MAP, DEFAULT_SAVINGS } from '../types';
 import { storageService } from '../services/storageService';
@@ -138,54 +139,75 @@ export default function ReminderSettingsScreen({ route, navigation }: Props) {
   };
 
   const handleSave = async () => {
-    if (!addiction) return;
+    const currentAddiction = COMMON_ADDICTIONS.find(a => a.id === addictionId);
 
-    const reminderTime = `${selectedHour.toString().padStart(2, '0')}:${selectedMinute
-      .toString()
-      .padStart(2, '0')}`;
-
-    const userAddiction: UserAddiction = {
-      addictionId: addiction.id,
-      addiction,
-      startDate: existingAddiction?.startDate || new Date(),
-      reminderTime,
-      enabled,
-      daysSober: existingAddiction?.daysSober || 0,
-      streakHistory: existingAddiction?.streakHistory,
-      customDailyHours: dailyHours,
-    };
+    if (!currentAddiction) {
+      console.error("Could not find addiction data");
+      return;
+    }
+    
+    // 1. Format the separate hour and minute states into an "HH:MM" string
+    const formattedTime = `${selectedHour.toString().padStart(2, '0')}:${selectedMinute.toString().padStart(2, '0')}`;
 
     try {
+      const userAddiction: UserAddiction = {
+        addictionId: addictionId,
+        addiction: currentAddiction,
+        startDate: existingAddiction ? existingAddiction.startDate : new Date().toISOString(),
+        reminderTime: formattedTime, // <-- Use the formatted string here
+        enabled: enabled, 
+        daysSober: existingAddiction?.daysSober || 0,
+        streakHistory: existingAddiction?.streakHistory,
+        customDailyHours: dailyHours,
+      };
+
+      // 2. Schedule the notification and attach the ID BEFORE saving
+      if (userAddiction.enabled) {
+        const notifId = await notificationService.scheduleReminder(userAddiction);
+        if (notifId) {
+          userAddiction.notificationId = notifId;
+        }
+      }
+
+      // 3. Save or Update in local storage
       if (existingAddiction) {
+        // Cancel the old notification to prevent duplicates!
+        if (existingAddiction.notificationId) {
+          await notificationService.cancelReminder(existingAddiction.notificationId);
+        }
+
         await storageService.updateAddiction(addictionId, {
-          reminderTime,
-          enabled,
+          reminderTime: formattedTime, // <-- Use the formatted string here too
+          enabled: enabled,
           customDailyHours: dailyHours,
+          notificationId: userAddiction.notificationId, // Ensure the new notif ID is saved
         });
       } else {
         await storageService.addAddiction(userAddiction);
       }
 
-      if (enabled) {
-        await notificationService.scheduleReminder(userAddiction);
-      }
-
+      // 4. Show success alert and navigate ONLY after the user clicks "OK"
       setAlertConfig({
         visible: true,
         title: 'Success!',
-        message: `Your reminder for ${addiction.name} has been ${existingAddiction ? 'updated' : 'set up'}.`,
+        message: `Your reminder for ${currentAddiction.name} has been ${
+          existingAddiction ? 'updated' : 'set up'
+        }.`,
         type: 'success',
         buttons: [
           {
             text: 'OK',
             onPress: () => {
               setAlertConfig((prev) => ({ ...prev, visible: false }));
-              navigation.popToTop();
+              navigation.popToTop(); // Safely navigates back after the alert is dismissed
             },
           },
         ],
       });
+
     } catch (error) {
+      // 5. Handle errors gracefully
+      console.error("Failed to save addiction:", error);
       setAlertConfig({
         visible: true,
         title: 'Error',

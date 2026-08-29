@@ -12,6 +12,7 @@ import { UserAddiction, getAddictionSavings, calculateSoberTime } from '../types
 import { storageService } from '../services/storageService';
 import { notificationService } from '../services/notificationService';
 import CustomAlertModal, { AlertButton } from '../components/CustomAlertModal';
+import AddictionSelectionScreen from './AddictionSelectionScreen';
 
 type RootStackParamList = {
   Home: undefined;
@@ -81,6 +82,7 @@ export default function HomeScreen({ navigation }: Props) {
         {
           text: 'Cancel',
           style: 'cancel',
+          // Cancel should do nothing except close the modal
           onPress: () => setAlertConfig((prev) => ({ ...prev, visible: false })),
         },
         {
@@ -88,6 +90,16 @@ export default function HomeScreen({ navigation }: Props) {
           style: 'destructive',
           onPress: async () => {
             setAlertConfig((prev) => ({ ...prev, visible: false }));
+            
+            // 1. Fetch and cancel the OS notification FIRST
+            const addictions = await storageService.getAddictions();
+            const addictionToDelete = addictions.find(a => a.addictionId === addictionId);
+            
+            if (addictionToDelete?.notificationId) {
+              await notificationService.cancelReminder(addictionToDelete.notificationId);
+            }
+            
+            // 2. Now safely remove the data from AsyncStorage
             await storageService.removeAddiction(addictionId);
             loadAddictions();
           },
